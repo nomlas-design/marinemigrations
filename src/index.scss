@@ -1,0 +1,59 @@
+:root {
+  --background: white;
+  --headerBackground: #f5f5f5;
+  --text: #0a0a0b;
+}
+
+[data-theme='dark'] {
+  --background: #0a0a0b;
+  --headerBackground: #1c1c1e;
+  --text: white;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.app {
+  background: var(--background);
+  color: var(--text);
+  transition: 0.3s background ease;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+}
+
+canvas {
+  height: 100vh;
+  width: 100%;
+}
+
+// Navbar
+
+header {
+  position: absolute;
+  top: 1vw;
+  z-index: 2;
+  width: 98%;
+  background: var(--headerBackground);
+  padding: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-radius: 0.5rem;
+  transition: 0.3s background ease;
+  h1 {
+    font-family: sans-serif;
+  }
+}
+
+footer {
+  position: absolute;
+  z-index: 2;
+  bottom: 0;
+  width: 100%;
+  padding: 1rem;
+}
