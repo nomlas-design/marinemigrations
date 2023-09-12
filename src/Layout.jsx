@@ -1,10 +1,10 @@
 import Header from './Header';
 import Footer from './Footer';
 
-function Layout({ children, toggleTheme }) {
+function Layout({ children, theme, toggleTheme }) {
   return (
     <>
-      <Header toggleTheme={toggleTheme} />
+      <Header theme={theme} toggleTheme={toggleTheme} />
       <main className='Layout__main'>{children}</main>
       <Footer />
     </>

@@ -2,32 +2,77 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   OrbitControls,
   useTexture,
-  CatmullRomLine,
   OrthographicCamera,
   shaderMaterial,
+  Stats,
 } from '@react-three/drei';
 import { Canvas, useFrame, useThree, extend } from '@react-three/fiber';
-import mapTexture from './assets/map.png';
+import mapTexture from './assets/map2.png';
 import { data } from './data/dummydata.js';
-import { vertexShader, fragmentShader } from './shaders/shaders';
+import {
+  vertexShader,
+  fragmentShader,
+  vertexShaderParticles,
+  fragmentShaderParticles,
+} from './shaders/shaders';
 import * as THREE from 'three';
+import { Leva, useControls } from 'leva';
 
 function MainCanvas() {
-  const [progress, setProgress] = useState(0);
-
   return (
-    <Canvas>
-      <OrbitControls />
-      <OrthographicCamera makeDefault position={[0, 0, 5]} />
-      <Map progress={progress} />
-    </Canvas>
+    <>
+      <Leva />
+      <Canvas>
+        <OrbitControls />
+        <Stats />
+        <OrthographicCamera makeDefault position={[0, 0, 5]} />
+        <Map />
+      </Canvas>
+    </>
   );
 }
 
-function Map({ progress }) {
+function Map({}) {
+  const { gl, camera } = useThree();
+  const raycaster = new THREE.Raycaster();
+  const mouse = new THREE.Vector2();
   const texture = useTexture(mapTexture);
-
   const { size } = useThree();
+
+  const { curvePoints } = useControls({
+    curvePoints: {
+      value: 40,
+      min: 1,
+      max: 100,
+      step: 1,
+    },
+  });
+
+  useEffect(() => {
+    const onClick = (event) => {
+      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+      raycaster.setFromCamera(mouse, camera);
+
+      const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+      const intersectionPoint = new THREE.Vector3();
+
+      if (raycaster.ray.intersectPlane(plane, intersectionPoint)) {
+        // Convert intersectionPoint coordinates to the 0-1 range
+        const relativeX = (intersectionPoint.x + sizes.width / 2) / sizes.width;
+        const relativeY =
+          (intersectionPoint.y + sizes.height / 2) / sizes.height;
+
+        console.log('Clicked at:', relativeX, relativeY);
+      }
+    };
+
+    gl.domElement.addEventListener('click', onClick);
+    return () => {
+      gl.domElement.removeEventListener('click', onClick);
+    };
+  }, [gl.domElement, camera, raycaster]);
 
   const sizes = useMemo(() => {
     const aspectRatio = texture.image.width / texture.image.height;
@@ -36,90 +81,77 @@ function Map({ progress }) {
     return { width, height, aspectRatio };
   }, [texture]);
 
-  let curves = [];
+  const { render: pathRender, paths } = Path({ data, sizes, curvePoints });
 
-  let timeframes = [];
+  return (
+    <mesh>
+      <planeGeometry args={[sizes.width, sizes.height]} />
+      <meshBasicMaterial side={THREE.DoubleSide} map={texture} />
+      <Particles data={data} paths={paths} />
+      {pathRender}
+    </mesh>
+  );
+}
 
-  for (let key in data) {
-    const dataset = data[key];
-    const paths = dataset.paths;
-    const start = dataset.start;
-    const end = dataset.end;
-    timeframes.push({ start, end });
-    let points = [];
-    for (let i = 0; i < paths.length; i++) {
-      const x = paths[i][0];
-      const y = paths[i][1];
-      const x_mapped = (x - 0.5) * sizes.width;
-      const y_mapped = (y - 0.5) * sizes.height;
+function Path({ data, sizes, curvePoints }) {
+  const curveMat = useRef();
+  const CurveMaterial = shaderMaterial({}, vertexShader, fragmentShader);
 
-      points.push(new THREE.Vector3(x_mapped, y_mapped, 0));
-    }
-    const curve = new THREE.CatmullRomCurve3(points);
-    curves.push(curve);
-  }
+  extend({ CurveMaterial });
 
-  function Path({ curve, start, end }) {
-    const curveMat = useRef();
-    const [progress, setProgress] = useState(0);
+  const { combinedGeometry, curveData } = useMemo(() => {
+    const combinedVertices = [];
+    const indices = [];
+    let currentIndex = 0;
 
-    const { viewport } = useThree();
+    const curveData = []; // This will store our paths for particles
 
-    function calculateCurveDistance(curve, samples) {
-      let totalDistance = 0;
-      let previousPoint = curve.getPoint(0);
+    for (let key in data) {
+      const paths = data[key].paths;
 
-      for (let i = 1; i <= samples; i++) {
-        let t = i / samples;
-        let currentPoint = curve.getPoint(t);
+      const vectors = paths.map(
+        (pt) =>
+          new THREE.Vector3(
+            (pt[0] - 0.5) * sizes.width,
+            (pt[1] - 0.5) * sizes.height,
+            0
+          )
+      );
 
-        totalDistance += currentPoint.distanceTo(previousPoint);
-        previousPoint = currentPoint;
+      const curve = new THREE.CatmullRomCurve3(vectors);
+      const curveVertices = curve.getPoints(curvePoints);
+
+      curveData.push(curveVertices); // Store the curve data
+
+      for (let vertex of curveVertices) {
+        combinedVertices.push(vertex.x, vertex.y, vertex.z);
       }
 
-      return totalDistance;
+      for (let i = 0; i < curveVertices.length - 1; i++) {
+        indices.push(currentIndex, currentIndex + 1);
+        currentIndex++;
+      }
+
+      currentIndex++;
     }
 
-    const curveDistance = calculateCurveDistance(curve, 500);
-
-    useEffect(() => {
-      curveMat.current.uniforms.uStart.value = start;
-      curveMat.current.uniforms.uEnd.value =
-        start + (curveDistance / sizes.width) * 0.5;
-    }, [start, end]);
-
-    useFrame(({ clock }) => {
-      progress <= 2 ? setProgress(progress + 0.001) : setProgress(0);
-      curveMat.current.uniforms.uProgress.value = progress;
-    });
-
-    const CurveMaterial = shaderMaterial(
-      {
-        uTime: {
-          value: 0,
-        },
-        uProgress: { value: 0 },
-        uStart: { value: start },
-        uEnd: { value: start + (curveDistance / 1000) * 0.5 },
-        uLength: { value: curveDistance },
-      },
-      vertexShader,
-      fragmentShader
+    const combinedGeometry = new THREE.BufferGeometry();
+    combinedGeometry.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute(combinedVertices, 3)
     );
+    combinedGeometry.setIndex(indices);
 
-    extend({ CurveMaterial });
+    return {
+      combinedGeometry,
+      curveData, // Return the curve data along with the geometry
+    };
+  }, [data, sizes, curvePoints]);
 
-    const points = curve.getPoints(128);
-    const vertices = new Float32Array(points.length * 3);
-    points.forEach((point, index) => {
-      vertices[index * 3] = point.x;
-      vertices[index * 3 + 1] = point.y;
-      vertices[index * 3 + 2] = point.z;
-    });
-
-    return (
-      <mesh>
-        <tubeGeometry args={[curve, 128, 1, 5, false]} />
+  return {
+    render: (
+      <lineSegments>
+        <primitive attach='geometry' object={combinedGeometry} />
         <curveMaterial
           ref={curveMat}
           side={THREE.DoubleSide}
@@ -128,40 +160,65 @@ function Map({ progress }) {
           depthWrite={false}
           blending={THREE.AdditiveBlending}
         />
-      </mesh>
-      // <line>
-      //   <bufferGeometry attach='geometry'>
-      //     <bufferAttribute
-      //       attach='attributes-position'
-      //       array={vertices}
-      //       count={points.length}
-      //       itemSize={3}
-      //     />
-      //   </bufferGeometry>
-      //   <lineBasicMaterial
-      //     color={0xffffff} // Adjust color as needed
-      //     linewidth={1} // Note: linewidth might not work on all platforms due to WebGL limitations
-      //     transparent={true}
-      //     blending={THREE.AdditiveBlending}
-      //   />
-      // </line>
+      </lineSegments>
+    ),
+    paths: curveData, // Return the curve data
+  };
+}
+
+function Particles({ data, paths }) {
+  const particlesRef = useRef();
+  const particlesMat = useRef();
+  const { clock } = useThree();
+
+  const keys = Object.keys(data).map(Number);
+
+  // Flatten your pings and paths arrays since uniforms need flat structures
+  const flatPings = keys.flatMap((k) => data[k].pings);
+  const flatPaths = paths.flat();
+
+  const ParticlesMaterial = shaderMaterial(
+    {
+      elapsedTime: clock.elapsedTime,
+      pings: flatPings,
+      paths: flatPaths,
+    },
+    vertexShaderParticles,
+    fragmentShaderParticles
+  );
+
+  extend({ ParticlesMaterial });
+
+  useEffect(() => {
+    const positions = new Float32Array(paths.length * 3);
+    particlesRef.current.geometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(positions, 3)
     );
-  }
+  }, [paths.length]);
+
+  useFrame(() => {
+    particlesMat.current.uniforms.elapsedTime.value =
+      clock.getElapsedTime() % 10;
+    particlesMat.current.uniforms.needsUpdate = true;
+    //particlesRef.current.geometry.attributes.position.needsUpdate = true;
+  });
+
+  console.log(particlesRef);
 
   return (
-    <mesh>
-      <planeGeometry args={[sizes.width, sizes.height]} />
-      <meshBasicMaterial map={texture} />
-      {curves.map((curve, index) => (
-        <Path
-          key={index}
-          curve={curve}
-          timeline={progress}
-          start={timeframes[index].start}
-          end={timeframes[index].end}
-        />
-      ))}
-    </mesh>
+    <points ref={particlesRef}>
+      <bufferGeometry attach='geometry' />
+      <particlesMaterial
+        ref={particlesMat}
+        attach='material'
+        side={THREE.DoubleSide}
+        depthTest={false}
+        transparent={true}
+        depthWrite={false}
+        blending={THREE.AdditiveBlending}
+      />
+    </points>
   );
 }
 
