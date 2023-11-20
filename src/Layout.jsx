@@ -5,7 +5,7 @@ function Layout({ children, theme, toggleTheme }) {
   return (
     <>
       <Header theme={theme} toggleTheme={toggleTheme} />
-      <main className='Layout__main'>{children}</main>
+      <main className='main'>{children}</main>
       <Footer />
     </>
   );
